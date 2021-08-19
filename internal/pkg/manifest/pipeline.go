@@ -183,9 +183,12 @@ type Build struct {
 
 // PipelineStage represents a stage in the pipeline manifest
 type PipelineStage struct {
-	Name             string   `yaml:"name"`
-	RequiresApproval bool     `yaml:"requires_approval,omitempty"`
-	TestCommands     []string `yaml:"test_commands,omitempty"`
+	Name                  string   `yaml:"name"`
+	RequiresApproval      bool     `yaml:"requires_approval,omitempty"`
+	TestCommands          []string `yaml:"test_commands,omitempty"`
+	PreDeployCodeBuilds   []string `yaml:"pre_deploy_code_builds,omitempty"`
+	PostDeployCodeBuilds  []string `yaml:"post_deploy_code_builds,omitempty"`
+	CodeBuildsServiceRole string   `yaml:"code_builds_service_role,omitempty"`
 }
 
 // NewPipelineManifest returns a pipeline manifest object.

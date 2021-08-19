@@ -1,5 +1,10 @@
 # Buildspec runs in the build stage of your pipeline.
 version: 0.2
+# PRISIDIO-CUSTOM
+env:
+  parameter-store:
+    docker_login_user: /Global/manual/prisidio/docker_login_user
+    docker_login_token: /Global/manual/prisidio/docker_login_token
 phases:
   install:
     runtime-versions:
@@ -12,11 +17,19 @@ phases:
       - wget {{.BinaryS3BucketPath}}/copilot-linux-{{.Version}}
       - mv ./copilot-linux-{{.Version}} ./copilot-linux
       - chmod +x ./copilot-linux
+  # PRISIDIO-CUSTOM
+  pre_build:
+    commands:
+      - docker login --username $docker_login_user --password $docker_login_token
+    on-failure: ABORT
   build:
     commands:
       - echo "Run your tests"
       # - make test
   post_build:
+    # PRISIDIO-CUSTOM
+    finally:
+      - docker logout
     commands:
       - ls -l
       - export COLOR="false"
@@ -37,9 +50,10 @@ phases:
       # The tag is the build ID but we replaced the colon ':' with a dash '-'.
       # We truncate the tag (from the front) to 128 characters, the limit for Docker tags
       # (https://docs.docker.com/engine/reference/commandline/tag/)
-      - tag=$(sed 's/:/-/g' <<<"$CODEBUILD_BUILD_ID" | rev | cut -c 1-128 | rev)
+      # PRISIDIO-CUSTOM (Docker tag name comes from version)
+      - tag="$(echo $pipeline | jq '.name' | sed 's/"//g')-$(cat .version/version.json| jq -r '.majorVersion').$(cat .version/version.json| jq -r '.minorVersion').$(cat .version/version.json| jq -r '.buildNumber')-$CODEBUILD_BUILD_NUMBER"
       - >
-        for env in $envs; do
+        for env in $pl_envs; do
           for svc in $svcs; do
           ./copilot-linux svc package -n $svc -e $env --output-dir './infrastructure' --tag $tag;
           done;
@@ -65,6 +79,7 @@ phases:
       # - For each manifest file:
       #   - Read the path to the Dockerfile by translating the YAML file into JSON.
       #   - Run docker build.
+      #   - Run docker build for test image.
       #   - For each environment:
       #     - Retrieve the ECR repository.
       #     - Login and push the image.
@@ -111,13 +126,18 @@ phases:
           echo "Docker build args: $build_args"
           echo "Running command: docker build -t $workload:$tag $build_args-f $df_path $df_dir_path";
           docker build -t $workload:$tag $build_args-f $df_path $df_dir_path;
+          echo "Running command: docker build -t $workload:$tag-test $build_args-f $df_path --target source $df_dir_path";
+          docker build -t $workload:$tag-test $build_args-f $df_path --target source $df_dir_path;
           image_id=$(docker images -q $workload:$tag);
-          for env in $envs; do
+          test_image_id=$(docker images -q $workload:$tag-test);
+          for env in $pl_envs; do
             repo=$(cat $CODEBUILD_SRC_DIR/infrastructure/$workload-$env.params.json | jq '.Parameters.ContainerImage' | sed 's/"//g');
             region=$(echo $repo | cut -d'.' -f4);
             $(aws ecr get-login-password --region $region | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$region.amazonaws.com);
             docker tag $image_id $repo;
+            docker tag $test_image_id $repo-test;
             docker push $repo;
+            docker push $repo-test;
           done;
         done;
 artifacts:

@@ -379,9 +379,12 @@ func (s *GitHubV1Source) Owner() (string, error) {
 // test commands, if the user has opted to add any.
 type PipelineStage struct {
 	*AssociatedEnvironment
-	LocalWorkloads   []string
-	RequiresApproval bool
-	TestCommands     []string
+	LocalWorkloads        []string
+	RequiresApproval      bool
+	TestCommands          []string
+	PreDeployCodeBuilds   []string
+	PostDeployCodeBuilds  []string
+	CodeBuildsServiceRole string
 }
 
 // WorkloadTemplatePath returns the full path to the workload CFN template

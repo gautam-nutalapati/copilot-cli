@@ -2243,6 +2243,21 @@ func (m *MockwsPipelineWriter) EXPECT() *MockwsPipelineWriterMockRecorder {
 	return m.recorder
 }
 
+// ServiceNames mocks base method.
+func (m *MockwsPipelineWriter) ServiceNames() ([]string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ServiceNames")
+	ret0, _ := ret[0].([]string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ServiceNames indicates an expected call of ServiceNames.
+func (mr *MockwsPipelineWriterMockRecorder) ServiceNames() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ServiceNames", reflect.TypeOf((*MockwsPipelineWriter)(nil).ServiceNames))
+}
+
 // WritePipelineBuildspec mocks base method.
 func (m *MockwsPipelineWriter) WritePipelineBuildspec(marshaler encoding.BinaryMarshaler) (string, error) {
 	m.ctrl.T.Helper()

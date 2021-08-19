@@ -29,4 +29,13 @@ stages:{{range .Stages}}
       {{if not .RequiresApproval }}# {{end}}requires_approval: true
       # Optional: use test commands to validate this stage of your build.
       # test_commands: [echo 'running tests', make test]
+
+      # Optional: use pre_deploy_code_builds or post_deploy_code_builds to link code builds in pipelines stages
+      #           code_builds_service_role is common service role used by specified code builds that trusts this pipeline.
+      #           Ensure below code build pipelines and roles deployed before running 'pipeline update' command
+      pre_deploy_code_builds:{{range $buildName := .PreDeployCodeBuilds}}
+        - {{$buildName}}{{end}}
+      post_deploy_code_builds:{{range $buildName := .PostDeployCodeBuilds}}
+        - {{$buildName}}{{end}}
+      code_builds_service_role: {{.CodeBuildsServiceRole}}
 {{end}}{{end}}
