@@ -1,5 +1,11 @@
 # Buildspec runs in the build stage of your pipeline.
 version: 0.2
+# PRISIDIO-CUSTOM
+env:
+  parameter-store:
+    docker_login_user: /Global/manual/prisidio/docker_login_user
+    docker_login_token: /Global/manual/prisidio/docker_login_token
+    slack_token: /Global/manual/prisidio/slack_token
 phases:
   install:
     runtime-versions:
@@ -12,11 +18,36 @@ phases:
       - wget {{.BinaryS3BucketPath}}/copilot-linux-{{.Version}}
       - mv ./copilot-linux-{{.Version}} ./copilot-linux
       - chmod +x ./copilot-linux
+      - curl https://cicd-test-scripts.s3.amazonaws.com/get_recent_git_commit_users.sh -o get_recent_git_commit_users.sh
+      - chmod +x get_recent_git_commit_users.sh
+      - curl https://cicd-test-scripts.s3.amazonaws.com/slack_notify.sh -o slack_notify.sh
+      - chmod +x slack_notify.sh
+      - mkdir ./infrastructure
+      - sh get_recent_git_commit_users.sh > ./infrastructure/recent_commit_users.txt
+      - cat ./infrastructure/recent_commit_users.txt
+      - echo "$(cat .version/version.json| jq -r '.majorVersion').$(cat .version/version.json| jq -r '.minorVersion').$(cat .version/version.json| jq -r '.buildNumber')" > ./infrastructure/src_version.txt
+      - echo $(cat ./infrastructure/src_version.txt)
+  # PRISIDIO-CUSTOM
+  pre_build:
+    commands:
+      - docker login --username $docker_login_user --password $docker_login_token
+    on-failure: ABORT
+    finally:
+      - if [[ $CODEBUILD_BUILD_SUCCEEDING -eq 0 ]]; then sh slack_notify.sh failure PreBuild "<$CODEBUILD_BUILD_URL|$(cut -d':' -f1 <<<$CODEBUILD_BUILD_ID)>:$(cat ./infrastructure/src_version.txt)" $(cat ./infrastructure/recent_commit_users.txt); fi
   build:
     commands:
       - echo "Run your tests"
       # - make test
+    # Enable below if notifications are needed for this stage
+    # finally:
+    #   - if [[ $CODEBUILD_BUILD_SUCCEEDING -eq 0 ]]; then sh slack_notify.sh failure Build "<$CODEBUILD_BUILD_URL|$(cut -d':' -f1 <<<$CODEBUILD_BUILD_ID)>:$(cat ./infrastructure/src_version.txt)" $(cat ./infrastructure/recent_commit_users.txt); fi
   post_build:
+    # PRISIDIO-CUSTOM
+    on-failure: ABORT
+    # PRISIDIO-CUSTOM
+    finally:
+      - docker logout
+      - if [[ $CODEBUILD_BUILD_SUCCEEDING -eq 0 ]]; then sh slack_notify.sh failure Build "<$CODEBUILD_BUILD_URL|$(cut -d':' -f1 <<<$CODEBUILD_BUILD_ID)>:$(cat ./infrastructure/src_version.txt)" $(cat ./infrastructure/recent_commit_users.txt); else sh slack_notify.sh success Build "<$CODEBUILD_BUILD_URL|$(cut -d':' -f1 <<<$CODEBUILD_BUILD_ID)>:$(cat ./infrastructure/src_version.txt)"; fi
     commands:
       - ls -l
       - export COLOR="false"
@@ -35,14 +66,19 @@ phases:
       # The tag is the build ID but we replaced the colon ':' with a dash '-'.
       # We truncate the tag (from the front) to 128 characters, the limit for Docker tags
       # (https://docs.docker.com/engine/reference/commandline/tag/)
-      - tag=$(sed 's/:/-/g' <<<"$CODEBUILD_BUILD_ID" | rev | cut -c 1-128 | rev)
+      # PRISIDIO-CUSTOM (Docker tag name comes from version)
+      - tag="$(echo $pipeline | jq '.name' | sed 's/"//g')-$(cat .version/version.json| jq -r '.majorVersion').$(cat .version/version.json| jq -r '.minorVersion').$(cat .version/version.json| jq -r '.buildNumber')-$CODEBUILD_BUILD_NUMBER"
       - >
         for env in $pl_envs; do
           for svc in $svcs; do
           ./copilot-linux svc package -n $svc -e $env --output-dir './infrastructure' --tag $tag;
+          # PRISIDIO-CUSTOM Ensures code build fails if docker build fails
+          exitcode=$?;  if [ $exitcode -ne 0 ]; then echo "ERROR: Failed to package $svc $env"; exit $exitcode; fi
           done;
           for job in $jobs; do
           ./copilot-linux job package -n $job -e $env --output-dir './infrastructure' --tag $tag;
+          # PRISIDIO-CUSTOM Ensures code build fails if docker build fails
+          exitcode=$?;  if [ $exitcode -ne 0 ]; then echo "ERROR: Failed to package $svc $env"; exit $exitcode; fi
           done;
         done;
       - ls -lah ./infrastructure
@@ -63,6 +99,7 @@ phases:
       # - For each manifest file:
       #   - Read the path to the Dockerfile by translating the YAML file into JSON.
       #   - Run docker build.
+      #   - PRISIDIO-CUSTOM Run docker build for test image.
       #   - For each environment:
       #     - Retrieve the ECR repository.
       #     - Login and push the image.
@@ -109,13 +146,21 @@ phases:
           echo "Docker build args: $build_args"
           echo "Running command: docker build -t $workload:$tag $build_args-f $df_path $df_dir_path";
           docker build -t $workload:$tag $build_args-f $df_path $df_dir_path;
+          # Ensures code build fails if docker build fails
+          exitcode=$?;  if [ $exitcode -ne 0 ]; then echo "ERROR: Docker build failed."; exit $exitcode; fi
+          echo "Running command: docker build -t $workload:$tag-test $build_args-f $df_path --target source $df_dir_path";
+          docker build -t $workload:$tag-test $build_args-f $df_path --target source $df_dir_path;
           image_id=$(docker images -q $workload:$tag);
+          test_image_id=$(docker images -q $workload:$tag-test);
           for env in $pl_envs; do
             repo=$(cat $CODEBUILD_SRC_DIR/infrastructure/$workload-$env.params.json | jq '.Parameters.ContainerImage' | sed 's/"//g');
             region=$(echo $repo | cut -d'.' -f4);
+            echo "Executing command: aws ecr get-login-password --region $region | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$region.amazonaws.com;"
             $(aws ecr get-login-password --region $region | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$region.amazonaws.com);
             docker tag $image_id $repo;
+            docker tag $test_image_id $repo-test;
             docker push $repo;
+            docker push $repo-test;
           done;
         done;
 artifacts:

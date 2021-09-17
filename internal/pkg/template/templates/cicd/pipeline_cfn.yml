@@ -39,6 +39,31 @@ Resources:
               Action:
               - sts:AssumeRole
             {{- end }}
+        - PolicyName: assume-e2e-web-execution-role
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+            {{- range $stage := .Stages }}
+            - Effect: Allow
+              Resource: 'arn:aws:iam::{{$stage.AccountID}}:role/{{$.AppName}}-{{$stage.Name}}-e2e-web-Custom-E2EWebExecutionRole'
+              Action:
+              - sts:AssumeRole
+            {{- end }}
+{{- if isCodeStarConnection .Source}}
+        - PolicyName: prisidio-github-connection
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+            - Effect: Allow
+              Resource:
+              {{- if eq .Source.ConnectionARN ""}}
+                - !Ref SourceConnection
+              {{- else}}
+                - {{$.Source.Connection}}
+              {{- end}}
+              Action:
+                - codestar-connections:UseConnection
+{{- end}}
   BuildProjectPolicy:
     Type: AWS::IAM::Policy
     DependsOn: BuildProjectRole
@@ -232,6 +257,11 @@ Resources:
               - sts:AssumeRole
             Resource:{{range $stage := .Stages}}
               - arn:aws:iam::{{$stage.AccountID}}:role/{{$.AppName}}-{{$stage.Name}}-EnvManagerRole{{end}}
+          - Effect: Allow
+            Action:
+              - sts:AssumeRole
+            Resource:{{range $stage := .Stages}}
+            - arn:aws:iam::{{$stage.AccountID}}:role/{{$.AppName}}-{{$stage.Name}}-django-IT-CodeBuildRole{{end}}
       Roles:
         - !Ref PipelineRole
 {{- range $index, $stage := .Stages}}
@@ -248,6 +278,9 @@ Resources:
         Image: aws/codebuild/amazonlinux2-x86_64-standard:3.0
         ComputeType: BUILD_GENERAL1_SMALL
         PrivilegedMode: true
+        EnvironmentVariables:
+          - Name: AWS_ACCOUNT_ID
+            Value: !Sub '${AWS::AccountId}'
       Source:
         Type: NO_SOURCE
         BuildSpec: |
@@ -319,6 +352,7 @@ Resources:
                 {{- end}}
                 FullRepositoryId: {{$.Source.Repository}}
                 BranchName: {{$.Source.Branch}}
+                OutputArtifactFormat: CODEBUILD_CLONE_REF
               OutputArtifacts:
                 - Name: SCCheckoutArtifact
               RunOrder: 1
@@ -362,7 +396,20 @@ Resources:
                 Owner: AWS
                 Version: 1
                 Provider: Manual
-              RunOrder: 1{{end}}{{range $workload := $stage.LocalWorkloads}}
+              RunOrder: 1{{end}}{{range $index, $preDeployCodeBuild := $stage.PreDeployCodeBuilds}}
+            - Name: PreDeployTests-{{$index}}
+              Region: {{$stage.Region}}
+              RoleArn: {{$stage.CodeBuildsServiceRole}}
+              ActionTypeId:
+                Category: Test
+                Owner: AWS
+                Version: 1
+                Provider: CodeBuild
+              RunOrder: 2
+              Configuration:
+                ProjectName: {{$preDeployCodeBuild}}
+              InputArtifacts:
+                - Name: BuildOutput{{end}}{{range $workload := $stage.LocalWorkloads}}
             - Name: CreateOrUpdate-{{$workload}}-{{$stage.Name}}
               Region: {{$stage.Region}}
               ActionTypeId:
@@ -384,11 +431,24 @@ Resources:
                 RoleArn: arn:aws:iam::{{$stage.AccountID}}:role/{{$.AppName}}-{{$stage.Name}}-CFNExecutionRole
               InputArtifacts:
                 - Name: BuildOutput
-              RunOrder: 2
+              RunOrder: 3
               # The ARN of the environment manager IAM role (in the env
               # account) that performs the declared action. This is assumed
               # through the roleArn for the pipeline.
-              RoleArn: arn:aws:iam::{{$stage.AccountID}}:role/{{$.AppName}}-{{$stage.Name}}-EnvManagerRole{{end}}{{if $stage.TestCommands}}
+              RoleArn: arn:aws:iam::{{$stage.AccountID}}:role/{{$.AppName}}-{{$stage.Name}}-EnvManagerRole{{end}}{{range $index, $postDeployCodeBuild := $stage.PostDeployCodeBuilds}}
+            - Name: PostDeployTests-{{$index}}
+              Region: {{$stage.Region}}
+              RoleArn: {{$stage.CodeBuildsServiceRole}}
+              ActionTypeId:
+                Category: Test
+                Owner: AWS
+                Version: 1
+                Provider: CodeBuild
+              RunOrder: 4
+              Configuration:
+                ProjectName: {{$postDeployCodeBuild}}
+              InputArtifacts:
+                - Name: BuildOutput{{end}}{{if $stage.TestCommands}}
             - Name: TestCommands
               ActionTypeId:
                 Category: Test
@@ -397,7 +457,7 @@ Resources:
                 Provider: CodeBuild
               Configuration:
                 ProjectName: !Ref BuildTestCommands{{logicalIDSafe $stage.Name}}
-              RunOrder: 3
+              RunOrder: 5
               InputArtifacts:
                 - Name: SCCheckoutArtifact{{end}}{{end}}{{end}}{{end}}
 {{- if isCodeStarConnection .Source}}

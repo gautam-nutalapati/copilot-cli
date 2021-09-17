@@ -502,9 +502,24 @@ func (o *initPipelineOpts) createPipelineManifest() error {
 	var stages []manifest.PipelineStage
 	for _, env := range o.envConfigs {
 
+		var preDeployCodeBuilds []string
+		var postDeployCodeBuilds []string
+		svcs, err := o.workspace.ServiceNames()
+		if err != nil {
+			return fmt.Errorf("list workspace services: %w", err)
+		}
+
+		for _, svc := range svcs {
+			preDeployCodeBuilds = append(preDeployCodeBuilds, o.appName+"-"+env.Name+"-"+svc+"-PreDeployIT")
+			postDeployCodeBuilds = append(postDeployCodeBuilds, o.appName+"-"+env.Name+"-"+svc+"-PostDeployIT")
+		}
+
 		stage := manifest.PipelineStage{
-			Name:             env.Name,
-			RequiresApproval: env.Prod,
+			Name:                  env.Name,
+			RequiresApproval:      env.Prod,
+			PreDeployCodeBuilds:   preDeployCodeBuilds,
+			PostDeployCodeBuilds:  postDeployCodeBuilds,
+			CodeBuildsServiceRole: "arn:aws:iam::" + env.AccountID + ":role/" + env.App + "-" + env.Name + "-django-IT-CodeBuildRole",
 		}
 		stages = append(stages, stage)
 	}

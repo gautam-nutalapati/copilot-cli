@@ -246,6 +246,7 @@ type wsPipelineManifestReader interface {
 type wsPipelineWriter interface {
 	WritePipelineBuildspec(marshaler encoding.BinaryMarshaler) (string, error)
 	WritePipelineManifest(marshaler encoding.BinaryMarshaler) (string, error)
+	ServiceNames() ([]string, error)
 }
 
 type wsServiceLister interface {
