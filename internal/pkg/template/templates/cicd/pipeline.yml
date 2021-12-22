@@ -18,8 +18,9 @@ source:
     {{$key}}: {{$value}}{{end}}
     {{- if .Source.IsCodeStarConnection}}
     # Optional: specify the name of an existing CodeStar Connections connection.
-    # connection_name: a-connection
+    connection_name: prisidio-global-connection
     {{- end}}
+    output_artifact_format: CODEBUILD_CLONE_REF
 {{$length := len .Stages}}{{if gt $length 0}}
 # This section defines the order of the environments your pipeline will deploy to.
 stages:{{range .Stages}}
@@ -29,4 +30,17 @@ stages:{{range .Stages}}
       {{if not .RequiresApproval }}# {{end}}requires_approval: true
       # Optional: use test commands to validate this stage of your build.
       # test_commands: [echo 'running tests', make test]
+
+      # PRISIDIO-CUSTOM
+      # Optional: use pre_deploy_code_builds or post_deploy_code_builds to link code builds in pipelines stages
+      #           code_builds_service_role is a service role used by specified code builds that trusts this pipeline.
+      #           Ensure below code build pipelines and roles deployed before running 'pipeline update' command
+      # pre-deploy tests are tests run inside pipeline but do not need additional permissions (e.g. access dynamo). If such tests exist, enable below stage.
+#      pre_deploy_code_builds:{{range $buildName := .PreDeployCodeBuilds}}
+#        - {{$buildName}}{{end}}
+      # Uncomment below if post-deploy exists
+#      post_deploy_code_builds:{{range $buildName := .PostDeployCodeBuilds}}
+#        - {{$buildName}}{{end}}
+      # Uncomment below if either pre/post deploy is specified
+#      code_builds_service_role: {{.CodeBuildsServiceRole}}
 {{end}}{{end}}

@@ -195,6 +195,9 @@ func (o *updatePipelineOpts) convertStages(manifestStages []manifest.PipelineSta
 			},
 			RequiresApproval: stage.RequiresApproval,
 			TestCommands:     stage.TestCommands,
+			PreDeployCodeBuilds: stage.PreDeployCodeBuilds,
+			PostDeployCodeBuilds: stage.PostDeployCodeBuilds,
+			CodeBuildsServiceRole: stage.CodeBuildsServiceRole,
 		}
 		stages = append(stages, pipelineStage)
 	}
